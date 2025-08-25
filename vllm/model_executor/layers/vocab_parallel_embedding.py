@@ -422,7 +422,7 @@ class VocabParallelEmbedding(CustomOp):
         s += f', tp_size={self.tp_size}'
         return s
 
-
+@CustomOp.register("parallel_lm_head")
 class ParallelLMHead(VocabParallelEmbedding):
     """Parallelized LM head.
 
