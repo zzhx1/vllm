@@ -7,10 +7,10 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-from vllm.ops import CustomOp
 import vllm.envs as envs
 from vllm.distributed import (tensor_model_parallel_all_gather,
                               tensor_model_parallel_gather)
+from vllm.model_executor.custom_op import CustomOp
 from vllm.model_executor.layers.vocab_parallel_embedding import (
     VocabParallelEmbedding)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
