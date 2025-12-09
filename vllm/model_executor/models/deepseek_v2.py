@@ -1004,7 +1004,6 @@ class DeepseekV2MLAAttention(nn.Module):
         
         import vllm.envs as envs
         from vllm.model_executor.layers.linear import CustomReplicatedLinear
-        print(f"zzh-debug:{envs.ENABLE_DEEPSEEK_OPROJ_OPT}")
         if envs.ENABLE_DEEPSEEK_OPROJ_OPT:
             self.o_proj = CustomReplicatedLinear(
                 self.num_heads * self.v_head_dim,
