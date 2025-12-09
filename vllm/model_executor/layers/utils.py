@@ -249,3 +249,7 @@ def dispatch_unquantized_gemm() -> Callable[..., torch.Tensor]:
         return cpu_unquantized_gemm
     else:
         return default_unquantized_gemm
+
+
+def enable_deepseek_oproj_opt() -> None:
+    return envs.ENABLE_DEEPSEEK_OPROJ_OPT

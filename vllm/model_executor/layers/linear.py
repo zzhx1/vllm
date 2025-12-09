@@ -1422,3 +1422,110 @@ class RowParallelLinear(LinearBase):
         s += f", tp_size={self.tp_size}"
         s += f", reduce_results={self.reduce_results}"
         return s
+
+import torch.distributed as dist
+from vllm.distributed.parallel_state import get_tp_group
+class CustomReplicatedLinear(ReplicatedLinear):
+    """A ReplicatedLinear that supports collective RPC."""
+
+    def __init__(
+        self,
+        input_size: int,
+        output_size: int,
+        bias: bool = True,
+        params_dtype: torch.dtype | None = None,
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
+        disable_tp: bool = False,
+    ):
+        super().__init__(
+            input_size=input_size,
+            output_size=output_size,
+            bias=bias,
+            params_dtype=params_dtype,
+            quant_config=quant_config,
+            prefix=prefix,
+            disable_tp=disable_tp,
+        )
+        self.forward_type = "all_gather_o"
+    
+    def forward(
+        self,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
+        if self.forward_type == "all_gather_o":
+            return self.forward_all_gather_o(x)
+        elif self.forward_type == "all_to_all_o":
+            return self.forward_all_to_all_o(x)
+        else:
+            raise ValueError(f"Unknown forward type: {self.forward_type}")
+        
+    
+    
+    
+    
+    def forward_all_gather_o(
+        self,
+        x: torch.Tensor,
+    ) -> torch.Tensor | tuple[torch.Tensor, Parameter | None]:
+        bias = self.bias if not self.skip_bias_add else None
+        assert self.quant_method is not None
+        complete_input = get_tp_group().all_gather(x)
+        output = self.quant_method.apply(self, complete_input, bias)
+        output_bias = self.bias if self.skip_bias_add else None
+
+        if not self.return_bias:
+            return output
+        return output, output_bias
+    
+    def forward_all_to_all_o(
+        self,
+        x: torch.Tensor,
+    ) -> torch.Tensor | tuple[torch.Tensor, Parameter | None]:
+        bias = self.bias if not self.skip_bias_add else None
+        assert self.quant_method is not None
+
+        tp_group = get_tp_group()
+        world_size = tp_group.world_size
+        seq_len, hidden_local = x.shape
+        
+        # padding if seq_len is not divisible by world_size
+        pad_len = (world_size - (seq_len % world_size)) % world_size
+        if pad_len > 0:
+            # pad along sequence dimension (dim=0)
+            x_padded = torch.nn.functional.pad(x, (0, 0, 0, pad_len), mode='constant', value=0)
+            padded_seq_len = seq_len + pad_len
+        else:
+            x_padded = x
+            padded_seq_len = seq_len
+
+
+        chunk_size = padded_seq_len // world_size
+        input_chunks = [
+            x_padded[i * chunk_size : (i + 1) * chunk_size] for i in range(world_size)
+        ]  # each: [chunk_size, hidden_local]
+
+        output_chunks = [
+            torch.empty_like(input_chunks[0]) for _ in range(world_size)
+        ]  # each: [chunk_size, hidden_local]
+
+
+        dist.all_to_all(
+            output_tensor_list=output_chunks,
+            input_tensor_list=input_chunks,
+            group=tp_group.device_group,
+        )
+        complete_input = torch.cat(output_chunks, dim=1)  # [chunk_size, hidden_local * world_size] = [seq//TP (rounded), hidden]
+        output = self.quant_method.apply(self, complete_input, bias)  # [chunk_size, out_features]
+        complete_output = get_tp_group().all_gather(output, dim=0)  # [padded_seq_len, out_features]
+        if pad_len > 0:
+            complete_output = complete_output[:seq_len]  # remove padding
+
+        output_bias = self.bias if self.skip_bias_add else None
+
+        if not self.return_bias:
+            return complete_output
+        return complete_output, output_bias
+        
+        
+        

@@ -92,6 +92,8 @@ from .utils import (
     make_layers,
     maybe_prefix,
 )
+from vllm.model_executor.layers.linear import CustomReplicatedLinear
+from vllm.model_executor.layers.utils import enable_deepseek_oproj_opt
 
 if current_platform.is_cuda_alike():
     from vllm import _custom_ops as ops
@@ -1001,13 +1003,22 @@ class DeepseekV2MLAAttention(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.kv_b_proj",
         )
-        self.o_proj = RowParallelLinear(
-            self.num_heads * self.v_head_dim,
-            self.hidden_size,
-            bias=False,
-            quant_config=quant_config,
-            prefix=f"{prefix}.o_proj",
-        )
+        if enable_deepseek_oproj_opt():
+            self.o_proj = CustomReplicatedLinear(
+                self.num_heads * self.v_head_dim,
+                self.hidden_size,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.o_proj",
+            )
+        else:
+            self.o_proj = RowParallelLinear(
+                self.num_heads * self.v_head_dim,
+                self.hidden_size,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.o_proj",
+            )
 
         if config.rope_parameters["rope_type"] != "default":
             config.rope_parameters["rope_type"] = (
