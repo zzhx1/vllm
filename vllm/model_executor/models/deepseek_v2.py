@@ -1001,13 +1001,26 @@ class DeepseekV2MLAAttention(nn.Module):
             quant_config=quant_config,
             prefix=f"{prefix}.kv_b_proj",
         )
-        self.o_proj = RowParallelLinear(
-            self.num_heads * self.v_head_dim,
-            self.hidden_size,
-            bias=False,
-            quant_config=quant_config,
-            prefix=f"{prefix}.o_proj",
-        )
+        
+        import vllm.envs as envs
+        from vllm.model_executor.layers.linear import CustomReplicatedLinear
+        print(f"zzh-debug:{envs.ENABLE_DEEPSEEK_OPROJ_OPT}")
+        if envs.ENABLE_DEEPSEEK_OPROJ_OPT:
+            self.o_proj = CustomReplicatedLinear(
+                self.num_heads * self.v_head_dim,
+                self.hidden_size,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.o_proj",
+            )
+        else:
+            self.o_proj = RowParallelLinear(
+                self.num_heads * self.v_head_dim,
+                self.hidden_size,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.o_proj",
+            )
 
         if config.rope_parameters["rope_type"] != "default":
             config.rope_parameters["rope_type"] = (

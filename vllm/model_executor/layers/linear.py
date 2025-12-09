@@ -1422,3 +1422,46 @@ class RowParallelLinear(LinearBase):
         s += f", tp_size={self.tp_size}"
         s += f", reduce_results={self.reduce_results}"
         return s
+
+
+from vllm.distributed.parallel_state import get_tp_group
+class CustomReplicatedLinear(ReplicatedLinear):
+    """A ReplicatedLinear that supports collective RPC."""
+
+    def __init__(
+        self,
+        input_size: int,
+        output_size: int,
+        bias: bool = True,
+        params_dtype: torch.dtype | None = None,
+        quant_config: QuantizationConfig | None = None,
+        prefix: str = "",
+        disable_tp: bool = False,
+    ):
+        super().__init__(
+            input_size=input_size,
+            output_size=output_size,
+            bias=bias,
+            params_dtype=params_dtype,
+            quant_config=quant_config,
+            prefix=prefix,
+            disable_tp=disable_tp,
+        )
+        
+    def forward(
+        self,
+        x: torch.Tensor,
+    ) -> torch.Tensor | tuple[torch.Tensor, Parameter | None]:
+        bias = self.bias if not self.skip_bias_add else None
+        assert self.quant_method is not None
+        
+        complete_input = get_tp_group().all_gather(x)
+        output = self.quant_method.apply(self, complete_input, bias)
+        output_bias = self.bias if self.skip_bias_add else None
+
+        if not self.return_bias:
+            return output
+        return output, output_bias
+        
+        
+        
