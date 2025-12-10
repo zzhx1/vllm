@@ -61,6 +61,9 @@ class TritonMLAImpl(MLACommonImpl[MLACommonMetadata]):
         # MLA Specific Arguments
         **mla_args,
     ) -> None:
+        from vllm.distributed.parallel_state import get_tensor_model_parallel_rank
+        if get_tensor_model_parallel_rank() == 0:
+            print(f"zzh-debug : Initializing TritonMLAImpl with attn_type={attn_type}")
         super().__init__(
             num_heads,
             head_size,

@@ -231,7 +231,10 @@ from vllm.v1.attention.backends.utils import (
     split_decodes_and_prefills,
 )
 from vllm.v1.kv_cache_interface import AttentionSpec
-
+from vllm.model_executor.layers.layer_shard_linear import (
+    is_hidden_layer,
+    reach_layer_for_shared_weight_series)
+import vllm.envs as envs
 
 class QueryLenSupport(Enum):
     """Defines the level of query length support for an attention backend's
@@ -1911,6 +1914,8 @@ class MLACommonImpl(MLACommonBaseImpl[M], Generic[M]):
             # During the profile run try to simulate to worse case output size
             # for `self.kv_b_proj(kv_c_normed)` in `_compute_prefill_context`
             # since this can be large
+            if envs.ENABLE_DEEPSEEK_OPROJ_OPT and is_hidden_layer(self.vllm_config, self.o_proj):
+                reach_layer_for_shared_weight_series(self.o_proj)
             _ = torch.empty(
                 (
                     self.chunked_prefill_workspace_size,

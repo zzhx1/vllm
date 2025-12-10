@@ -45,7 +45,7 @@ from vllm.v1.kv_cache_interface import (
     MLAAttentionSpec,
     SlidingWindowSpec,
 )
-
+from vllm.distributed.parallel_state import get_tp_group
 if current_platform.is_rocm():
     from vllm.platforms.rocm import on_gfx9
 else:
@@ -599,6 +599,7 @@ class MLAAttention(nn.Module, AttentionLayerBase):
         self.kv_lora_rank = kv_lora_rank
         self.head_size = kv_lora_rank + qk_rope_head_dim
         self.layer_name = prefix
+        self.enable_shard_layer = envs.ENABLE_DEEPSEEK_OPROJ_OPT
 
         if cache_config is not None:
             kv_cache_dtype = cache_config.cache_dtype
@@ -624,6 +625,9 @@ class MLAAttention(nn.Module, AttentionLayerBase):
             use_sparse=use_sparse,
         )
         impl_cls = cast(type[MLAAttentionImpl], self.attn_backend.get_impl_cls())
+        from vllm.distributed.parallel_state import get_tp_group
+        if get_tp_group().rank_in_group == 0:
+            print(f"zzh-debug : Using {impl_cls} for MLA Attention layer.")
         self.impl = impl_cls(
             num_heads=self.num_heads,
             head_size=self.head_size,
@@ -721,7 +725,9 @@ class MLAAttention(nn.Module, AttentionLayerBase):
                 )
 
     def process_weights_after_loading(self, act_dtype: torch.dtype):
+        print(f"0-zzh-debug: MLAAttention layer process_weights_after_loading called.")
         if hasattr(self.impl, "process_weights_after_loading"):
+            print(f"1-zzh-debug: Calling process_weights_after_loading for MLA layer.")
             self.impl.process_weights_after_loading(act_dtype)
 
     def calc_kv_scales(

@@ -1417,6 +1417,8 @@ def initialize_model_parallel(
         _TP.rank_in_group,
         _EP.rank_in_group,
     )
+    
+    
 
 
 def ensure_model_parallel_initialized(

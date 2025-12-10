@@ -8,7 +8,13 @@ from vllm.attention.layer import MLAAttention
 from vllm.config import CacheConfig
 from vllm.model_executor.custom_op import CustomOp
 from vllm.model_executor.layers.quantization import QuantizationConfig
-
+from vllm.config import VllmConfig, get_current_vllm_config
+import vllm.envs as envs
+from vllm.model_executor.layers.layer_shard_linear import (
+    is_hidden_layer,
+    reach_layer_for_shared_weight_series,
+    register_layer_to_shared_weight_series)
+from vllm.distributed.parallel_state import get_tp_group
 
 @dataclass
 class MLAModules:
@@ -83,7 +89,19 @@ class MultiHeadLatentAttentionWrapper(CustomOp):
         self.indexer = mla_modules.indexer
         self.indexer_rope_emb = mla_modules.indexer_rotary_emb
         self.is_sparse = mla_modules.is_sparse
+        self.vllm_config = get_current_vllm_config()
+        self.enable_shard_layer = envs.ENABLE_DEEPSEEK_OPROJ_OPT
+        
+        if self.enable_shard_layer and is_hidden_layer(self.vllm_config, self.o_proj):
+            register_layer_to_shared_weight_series(
+                series_name="o_proj",
+                group=get_tp_group(),
+                layer=self.o_proj,
+                prefetch_step=1
+            )
+        
 
+        
         if self.indexer is not None:
             assert hasattr(self.indexer, "topk_tokens")
             self.topk_tokens = self.indexer.topk_tokens
@@ -103,6 +121,7 @@ class MultiHeadLatentAttentionWrapper(CustomOp):
             kv_b_proj=self.kv_b_proj,
             use_sparse=self.is_sparse,
             indexer=self.indexer,
+            mla_modules=mla_modules,
         )
 
         self.prefix = prefix
@@ -115,6 +134,11 @@ class MultiHeadLatentAttentionWrapper(CustomOp):
     ) -> torch.Tensor:
         q_c = None
         kv_lora = None
+        if self.enable_shard_layer and is_hidden_layer(self.vllm_config, self.o_proj):
+            reach_layer_for_shared_weight_series(self.o_proj)
+            
+        if zzhdebug():
+            print(f"zzh-debug :Hidden states shape: {hidden_states.shape}, Positions shape: {positions.shape}", flush=True)
 
         if self.q_lora_rank is not None:
             assert self.fused_qkv_a_proj is not None, (
@@ -142,11 +166,17 @@ class MultiHeadLatentAttentionWrapper(CustomOp):
             )
             kv_lora = self.kv_a_proj_with_mqa(hidden_states)[0]
             q = self.q_proj(hidden_states)[0]
-
+            
+            if zzhdebug():
+                print(f"zzh-debug : kv_lora shape after kv_a_proj_with_mqa: {kv_lora.shape}", flush=True)
+                print(f"zzh-debug : q shape after q_proj: {q.shape}", flush=True)
+            
         kv_c, k_pe = kv_lora.split([self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
         kv_c_normed = self.kv_a_layernorm(kv_c)
-
+        
         q = q.view(-1, self.num_heads, self.qk_head_dim)
+        if zzhdebug():
+            print(f"zzh-debug : kv_c shape: {kv_c.shape}, k_pe shape: {k_pe.shape}", flush=True)
         # Add head dim of 1 to k_pe
         k_pe = k_pe.unsqueeze(1)
 
@@ -169,8 +199,24 @@ class MultiHeadLatentAttentionWrapper(CustomOp):
             k_pe,
             output_shape=(hidden_states.shape[0], self.num_heads * self.v_head_dim),
         )
-
+        if zzhdebug():
+            print(f"zzh-debug : attn_out shape before o_proj: {attn_out.shape}", flush=True)
+            print(f"\n\n\n\n\n",flush=True)
+        
         return self.o_proj(attn_out)[0]
+            
 
     def forward_cuda(self, *args, **kwargs):
         return self.forward_native(*args, **kwargs)
+
+
+
+
+
+
+
+def zzhdebug():
+    from vllm.distributed.parallel_state import get_tensor_model_parallel_rank
+    if get_tensor_model_parallel_rank() == 0:
+        return True
+    return False

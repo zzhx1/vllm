@@ -3484,6 +3484,9 @@ class GPUModelRunner(
             self.model = model_loader.load_model(
                 vllm_config=self.vllm_config, model_config=self.model_config
             )
+            from vllm.distributed import get_tp_group
+            if get_tp_group().rank_in_group == 0:
+                print(f"--- Model loaded: {self.model_config.model} ---\n{self.model}\n")
             if self.lora_config:
                 self.model = self.load_lora_model(
                     self.model, self.vllm_config, self.device
