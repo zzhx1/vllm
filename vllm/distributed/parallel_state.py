@@ -1119,6 +1119,11 @@ def get_pcp_group() -> GroupCoordinator:
     assert _PCP is not None, "prefill context parallel group is not initialized"
     return _PCP
 
+_SHARD_WEIGHT: GroupCoordinator | None = None
+
+def get_shard_weight_group() -> GroupCoordinator:
+    assert _SHARD_WEIGHT is not None, "shard weight parallel group is not initialized"
+    return _SHARD_WEIGHT
 
 @contextmanager
 def graph_capture(device: torch.device):
@@ -1404,6 +1409,25 @@ def initialize_model_parallel(
     _EP = init_model_parallel_group(
         group_ranks, get_world_group().local_rank, backend, group_name="ep"
     )
+    
+    global _SHARD_WEIGHT
+    assert _SHARD_WEIGHT is None, "shard weight parallel group is already initialized"
+    
+    group_ranks = []
+    for pp_idx in range(pipeline_model_parallel_size):
+        group = []
+        for dp_idx in range(data_parallel_size):
+            base = (dp_idx * pipeline_model_parallel_size + pp_idx) * tensor_model_parallel_size
+            for i in range(tensor_model_parallel_size):
+                global_rank = base + i
+                group.append(global_rank)
+        group_ranks.append(group)
+
+        _SHARD_WEIGHT = init_model_parallel_group(group_ranks,
+                                         get_world_group().local_rank,
+                                         backend,
+                                         group_name="shard_weight")
+    
 
     logger.info_once(
         "rank %s in world size %s is assigned as "
@@ -1570,6 +1594,11 @@ def destroy_model_parallel():
     if _EP:
         _EP.destroy()
     _EP = None
+
+    global _SHARD_WEIGHT
+    if _SHARD_WEIGHT:
+        _SHARD_WEIGHT.destroy()
+    _SHARD_WEIGHT = None
 
 
 def destroy_distributed_environment():
