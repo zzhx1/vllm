@@ -97,6 +97,10 @@ def process_weights_after_loading(
     maybe_save_metadata_and_attributes_for_weight_reloading(model, model_config)
 
     for _, module in model.named_modules():
+        
+        from vllm.distributed.parallel_state import get_tp_group
+       # if get_tp_group().rank_in_group == 0:
+           # print(f"zzh-debug 1 Processing weights after loading for module: {module.__dict__}")    
         quant_method = getattr(module, "quant_method", None)
         if isinstance(quant_method, QuantizeMethodBase):
             # When quant methods need to process weights after loading

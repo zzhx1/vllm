@@ -571,7 +571,7 @@ class MLAAttention(nn.Module, AttentionLayerBase):
     2. Perform (multi-head/multi-query/grouped-query) attention.
     3. Return the output tensor.
     """
-
+    from vllm.model_executor.layers.linear import LinearBase
     def __init__(
         self,
         num_heads: int,
@@ -587,6 +587,7 @@ class MLAAttention(nn.Module, AttentionLayerBase):
         prefix: str = "",
         use_sparse: bool = False,
         indexer: object | None = None,
+        oproj: LinearBase | None = None,
         **extra_impl_args,
     ):
         super().__init__()
@@ -599,7 +600,7 @@ class MLAAttention(nn.Module, AttentionLayerBase):
         self.kv_lora_rank = kv_lora_rank
         self.head_size = kv_lora_rank + qk_rope_head_dim
         self.layer_name = prefix
-
+        self.oproj = oproj
         if cache_config is not None:
             kv_cache_dtype = cache_config.cache_dtype
             block_size = cache_config.block_size
@@ -723,6 +724,11 @@ class MLAAttention(nn.Module, AttentionLayerBase):
     def process_weights_after_loading(self, act_dtype: torch.dtype):
         if hasattr(self.impl, "process_weights_after_loading"):
             self.impl.process_weights_after_loading(act_dtype)
+            from vllm.model_executor.layers.utils import enable_deepseek_oproj_opt, enable_deepseek_shard_weight
+            from vllm.model_executor.layers.layer_shard_linear import post_process_after_loading_for_shared_weight_series
+            if enable_deepseek_oproj_opt() and enable_deepseek_shard_weight():
+                if self.oproj is not None:
+                    post_process_after_loading_for_shared_weight_series(self.oproj)
 
     def calc_kv_scales(
         self, q: torch.Tensor, kv_c_normed: torch.Tensor, k_pe: torch.Tensor

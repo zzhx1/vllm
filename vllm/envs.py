@@ -237,6 +237,7 @@ if TYPE_CHECKING:
     VLLM_COMPILE_CACHE_SAVE_FORMAT: Literal["binary", "unpacked"] = "binary"
     VLLM_USE_V2_MODEL_RUNNER: bool = False
     ENABLE_DEEPSEEK_OPROJ_OPT: bool = False
+    ENABLE_DEEPSEEK_SHARD_WEIGHT: bool = False
 
 
 def get_default_cache_root():
@@ -1554,6 +1555,9 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "ENABLE_DEEPSEEK_OPROJ_OPT": lambda: bool(
         int(os.getenv("ENABLE_DEEPSEEK_OPROJ_OPT", "0"))
     ),
+    "ENABLE_DEEPSEEK_SHARD_WEIGHT": lambda: bool(
+        int(os.getenv("ENABLE_DEEPSEEK_SHARD_WEIGHT", "0"))
+    )
 }
 
 # --8<-- [end:env-vars-definition]

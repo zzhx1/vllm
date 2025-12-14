@@ -252,4 +252,11 @@ def dispatch_unquantized_gemm() -> Callable[..., torch.Tensor]:
 
 
 def enable_deepseek_oproj_opt() -> None:
+    if envs.ENABLE_DEEPSEEK_OPROJ_OPT:
+        logger.info_once("DeepSeek o_proj optimization is enabled.")
     return envs.ENABLE_DEEPSEEK_OPROJ_OPT
+
+def enable_deepseek_shard_weight() -> None:
+    if envs.ENABLE_DEEPSEEK_SHARD_WEIGHT:
+        logger.info_once("DeepSeek shard weight optimization is enabled.")
+    return envs.ENABLE_DEEPSEEK_SHARD_WEIGHT
