@@ -91,6 +91,7 @@ from .utils import (
     make_empty_intermediate_tensors_factory,
     make_layers,
     maybe_prefix,
+    enable_deepseek_dsa_cp,
 )
 
 if current_platform.is_cuda_alike():
@@ -1009,6 +1010,30 @@ class DeepseekV2MLAAttention(nn.Module):
             prefix=f"{prefix}.o_proj",
         )
 
+        if enable_deepseek_dsa_cp():
+            self.q_b_proj = ReplicatedLinear(
+                self.q_lora_rank,
+                self.num_heads * self.qk_head_dim,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.q_b_proj",
+            )
+            self.kv_b_proj = ReplicatedLinear(
+                self.kv_lora_rank,
+                self.num_heads * (self.qk_nope_head_dim + self.v_head_dim),
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.kv_b_proj",
+            )
+            self.o_proj = ReplicatedLinear(
+                self.num_heads * self.v_head_dim,
+                self.hidden_size,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.o_proj",
+            )
+            
+            
         if config.rope_parameters["rope_type"] != "default":
             config.rope_parameters["rope_type"] = (
                 "deepseek_yarn"
