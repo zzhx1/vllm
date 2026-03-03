@@ -6,6 +6,7 @@ from abc import abstractmethod
 from typing import Any
 
 import torch
+import torch.distributed as dist
 from torch.nn.parameter import Parameter, UninitializedParameter
 
 from vllm.distributed import (
@@ -32,6 +33,8 @@ from vllm.model_executor.parameter import (
     PerTensorScaleParameter,
     RowvLLMParameter,
 )
+from vllm.config import get_current_vllm_config
+from vllm.distributed.parallel_state import get_otp_group, get_tp_group
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 
@@ -1288,8 +1291,16 @@ class RowParallelLinear(LinearBase):
         disable_tp: bool = False,
     ):
         # Divide the weight matrix along the first dimension.
-        self.tp_rank = get_tensor_model_parallel_rank() if not disable_tp else 0
-        self.tp_size = get_tensor_model_parallel_world_size() if not disable_tp else 1
+        if "o_proj" in prefix and get_current_vllm_config().fine_grained_tp_config.oproj_tensor_parallel_size > 1:
+            self.comm_group = get_otp_group()
+            self.forward_type = "oproj_tp"
+        else:
+            self.comm_group = get_tp_group()
+            self.forward_type = "normal_tp"
+        
+        self.tp_rank = self.comm_group.rank_in_group if not disable_tp else 0
+        self.tp_size = self.comm_group.world_size if not disable_tp else 1
+        
         self.input_size_per_partition = divide(input_size, self.tp_size)
         self.output_size_per_partition = output_size
         self.output_partition_sizes = [output_size]
@@ -1386,6 +1397,64 @@ class RowParallelLinear(LinearBase):
         param.load_row_parallel_weight(loaded_weight=loaded_weight)
 
     def forward(
+        self,
+        input_,
+    ) -> torch.Tensor | tuple[torch.Tensor, Parameter | None]:
+        if self.forward_type == "oproj_tp":
+            return self.forward_oproj_tp(input_)
+        else:
+            return self.forward_normal_tp(input_)
+        
+    def forward_oproj_tp(
+        self,
+        input_,
+    ) -> torch.Tensor | tuple[torch.Tensor, Parameter | None]:
+        
+        if self.input_is_parallel:
+            input_parallel = input_
+        else:
+            splitted_input = split_tensor_along_last_dim(
+                input_, num_partitions=self.tp_size)
+            input_parallel = splitted_input[self.tp_rank].contiguous()
+
+        # Prepare tensors for all-to-all communication
+        local_batch_size = input_parallel.size(0)
+        chunk_size = self.input_size_per_partition
+        total_batch_size = local_batch_size * self.tp_size
+
+        # Reshape tensor for efficient cross-device transfer:
+        # [batch, dim] -> [tp_size, batch, chunk] -> flattened
+        send_buf = (input_parallel.reshape(-1,
+                                           self.tp_size, chunk_size).transpose(
+                                               0, 1).contiguous().view(-1))
+
+        # Create receive buffer
+        recv_buf = torch.empty(total_batch_size * chunk_size,
+                               dtype=input_parallel.dtype,
+                               device=input_parallel.device)
+
+        # Perform all-to-all communication
+        dist.all_to_all_single(recv_buf,
+                               send_buf,
+                               group=self.comm_group.device_group)
+        input_parallel = recv_buf.view(total_batch_size, chunk_size)
+
+        # Only fuse bias add for rank 0 to avoid duplicate bias addition in TP>1
+        bias_ = None if (self.tp_rank > 0 or self.skip_bias_add) else self.bias
+        assert self.quant_method is not None
+        output_parallel = self.quant_method.apply(self,
+                                                  input_parallel,
+                                                  bias=bias_)
+
+        # otp-specific: Combine partial results across devices
+        output = self.comm_group.reduce_scatter(output_parallel, dim=0)
+        output = output.view(input_.shape[0], self.output_size)
+
+        # Handle bias return based on configuration
+        output_bias = self.bias if self.skip_bias_add else None
+        return output, output_bias
+    
+    def forward_normal_tp(
         self,
         input_,
     ) -> torch.Tensor | tuple[torch.Tensor, Parameter | None]:
