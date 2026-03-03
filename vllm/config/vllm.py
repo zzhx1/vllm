@@ -37,7 +37,7 @@ from .load import LoadConfig
 from .lora import LoRAConfig
 from .model import ModelConfig
 from .observability import ObservabilityConfig
-from .parallel import ParallelConfig
+from .parallel import Finegrainedtp, ParallelConfig
 from .scheduler import SchedulerConfig
 from .speculative import SpeculativeConfig
 from .structured_outputs import StructuredOutputsConfig
@@ -224,6 +224,9 @@ class VllmConfig:
     # some opaque config, only used to provide additional information
     # for the hash computation, mainly used for testing, debugging or out of
     # tree config registration.
+    fine_grained_tp_config: Finegrainedtp = Field(default_factory=Finegrainedtp)
+    """Fine-grained tensor parallel configuration."""
+    
     additional_config: dict | SupportsHash = Field(default_factory=dict)
     """Additional config for specified platform. Different platforms may
     support different configs. Make sure the configs are valid for the platform

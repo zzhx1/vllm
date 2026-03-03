@@ -40,6 +40,7 @@ from vllm.config import (
     DeviceConfig,
     ECTransferConfig,
     EPLBConfig,
+    Finegrainedtp,
     KVEventsConfig,
     KVTransferConfig,
     LoadConfig,
@@ -568,6 +569,9 @@ class EngineArgs:
         CacheConfig.kv_offloading_backend
     )
     tokens_only: bool = False
+
+    # fine-grained tensor parallelism config
+    fine_grained_tp_config: Finegrainedtp | None = None
 
     def __post_init__(self):
         # support `EngineArgs(compilation_config={...})`
@@ -1137,6 +1141,7 @@ class EngineArgs:
         vllm_group.add_argument(
             "--optimization-level", **vllm_kwargs["optimization_level"]
         )
+        vllm_group.add_argument("--fine-grained-tp-config", **vllm_kwargs["fine_grained_tp_config"])
 
         # Other arguments
         parser.add_argument(
@@ -1734,6 +1739,7 @@ class EngineArgs:
             cache_config=cache_config,
             parallel_config=parallel_config,
             scheduler_config=scheduler_config,
+            fine_grained_tp_config=self.fine_grained_tp_config,
             device_config=device_config,
             lora_config=lora_config,
             speculative_config=speculative_config,
