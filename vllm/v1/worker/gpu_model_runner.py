@@ -4055,7 +4055,16 @@ class GPUModelRunner(
                 num_tokens_padded = ubatch_slices[0].num_tokens
                 if num_tokens_across_dp is not None:
                     num_tokens_across_dp[:] = num_tokens_padded
-
+            
+            need_dummy_logits = not is_profile and self.vllm_config.fine_grained_tp_config.lmhead_tensor_parallel_size > 1
+            max_token_across_dp = torch.max(num_tokens_across_dp).item() if num_tokens_across_dp is not None else num_tokens_padded
+            dummy_indices = torch.zeros(max_token_across_dp, dtype=torch.int32)
+            
+            def dummy_compute_logits(hidden_states):
+                if not need_dummy_logits:
+                    return None
+                return self.model.compute_logits(hidden_states[dummy_indices])
+            
             with (
                 self.maybe_randomize_inputs(input_ids),
                 set_forward_context(
@@ -4080,6 +4089,8 @@ class GPUModelRunner(
                 hidden_states, _ = outputs
             else:
                 hidden_states = outputs
+
+            dummy_compute_logits(hidden_states)
 
             if self.speculative_config and self.speculative_config.use_eagle():
                 assert isinstance(self.drafter, EagleProposer)
