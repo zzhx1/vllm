@@ -1298,12 +1298,6 @@ class RowParallelLinear(LinearBase):
             self.comm_group = get_tp_group()
             self.forward_type = "normal_tp"
         
-        self.tp_rank = self.comm_group.rank_in_group if not disable_tp else 0
-        self.tp_size = self.comm_group.world_size if not disable_tp else 1
-        
-        self.input_size_per_partition = divide(input_size, self.tp_size)
-        self.output_size_per_partition = output_size
-        self.output_partition_sizes = [output_size]
 
         super().__init__(
             input_size,
@@ -1315,6 +1309,13 @@ class RowParallelLinear(LinearBase):
             return_bias=return_bias,
             disable_tp=disable_tp,
         )
+        
+        self.tp_rank = self.comm_group.rank_in_group if not disable_tp else 0
+        self.tp_size = self.comm_group.world_size if not disable_tp else 1
+        
+        self.input_size_per_partition = divide(input_size, self.tp_size)
+        self.output_size_per_partition = output_size
+        self.output_partition_sizes = [output_size]
 
         self.input_is_parallel = input_is_parallel
         self.reduce_results = reduce_results
@@ -1416,7 +1417,6 @@ class RowParallelLinear(LinearBase):
             splitted_input = split_tensor_along_last_dim(
                 input_, num_partitions=self.tp_size)
             input_parallel = splitted_input[self.tp_rank].contiguous()
-
         # Prepare tensors for all-to-all communication
         local_batch_size = input_parallel.size(0)
         chunk_size = self.input_size_per_partition
